@@ -1,0 +1,12 @@
+streamlit
+google-generativeai
+python-dotenv
+langchain
+pypdf2==3.0.1
+pdfplumber
+chromadb
+faiss-cpu
+langchain_google_genai
+pyperclip
+pandas==1.5.3
+langchain-community
