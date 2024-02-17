@@ -96,11 +96,12 @@ body {
 st.markdown(custom_css, unsafe_allow_html=True)
 
 # Function to read PDF and extract text
-def read_pdf(pdf_path):
-    with pdfplumber.open(pdf_path) as pdf:
-        text = ""
-        for page in pdf.pages:
-            text += page.extract_text()
+def get_pdf_text(pdf_docs):
+    text = ""
+    for pdf in pdf_docs:
+        with pdfplumber.open(pdf) as pdf_reader:
+            for page in pdf_reader.pages:
+                text += page.extract_text()
     return text
 
 # Function to save email list to CSV
@@ -108,21 +109,14 @@ def save_to_csv(email_list, csv_filename="email_list.csv"):
     df = pd.DataFrame(email_list, columns=["Email"])
     df.to_csv(csv_filename, index=False)
 
-
+# Function to split text into chunks
 def get_text_chunks(text):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=100000, chunk_overlap=0)
     chunks = text_splitter.split_text(text)
     return chunks
 
-
-def get_vector_store(text_chunks):
-    embeddings = GoogleGenerativeAIEmbeddings(model = "models/embedding-001")
-    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
-    vector_store.save_local("faiss_index")
-
-
+# Function to create a conversational chain
 def get_conversational_chain():
-
     prompt_template = """
     expert and capable to read multiple languages .Answer the question as detailed as possible from the provided context if possible add some key points in list format , make sure to provide all the details, if the answer is not in
     provided context just say, "answer is not available in the context & add your suggestion is differet subtitle also", don't provide the wrong answer\n\n
@@ -132,76 +126,61 @@ def get_conversational_chain():
     Answer:
     """
 
-    model = ChatGoogleGenerativeAI(model="gemini-pro",
-                             temperature=0.3)
+    model = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3)
 
-    prompt = PromptTemplate(template = prompt_template, input_variables = ["context", "question"])
+    prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
     chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
 
     return chain
 
-
-# Main Streamlit app
-def main():
-    # Header
-    st.header("Chat with PDF using Gemini💁")
-    st.markdown("Welcome to the interactive PDF chat application.")
-
-    # Sidebar
-    st.sidebar.title("Menu:")
-    pdf_docs = st.sidebar.file_uploader("Upload your PDF File and Click on the Submit & Process Button", type=["pdf"])
-
-    # Email input box
-    email_input = st.sidebar.text_input("Enter your email:")
-
-    if st.sidebar.button("Submit Email"):
-        st.info(f"Email submitted: {email_input}")
-
-        # Assuming you want to save the email to a list for further processing
-        email_list = []  # Replace this with your actual list
-        email_list.append(email_input)
-
-        # Save email list to CSV
+# Function to handle user input and display chat messages
+def user_input(user_question, email_list):
+    email = st.text_input("Enter your email:")
+    if st.button("Submit Email"):
+        email_list.append(email)
         save_to_csv(email_list)
+        st.success(f"Email {email} submitted successfully!")
 
-    if st.sidebar.button("Submit & Process"):
-        if pdf_docs is not None:
-            with st.spinner("Processing..."):
-                raw_text = get_pdf_text(pdf_docs)
-                text_chunks = get_text_chunks(raw_text)
-                get_vector_store(text_chunks)
-                st.success("Done")
-        else:
-            st.warning("Please upload a PDF file.")
-    embeddings = GoogleGenerativeAIEmbeddings(model = "models/embedding-001")
-    
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+
     new_db = FAISS.load_local("faiss_index", embeddings)
     docs = new_db.similarity_search(user_question)
 
     chain = get_conversational_chain()
 
-    
     response = chain(
-        {"input_documents":docs, "question": user_question}
-        , return_only_outputs=True)
+        {"input_documents": docs, "question": user_question},
+        return_only_outputs=True
+    )
 
-    # Main content
-    st.text_area("Type your question here:", key="user_input")
+    st.text("User:")
+    st.text_input(value=user_question, key="user_input", disabled=True, max_chars=500, height=50)
+    st.text("AI Bot:")
+    st.text_area(value=response["output_text"], key="ai_output", disabled=True, height=200, max_chars=1500)
 
-    if st.button("Submit Question"):
-        user_question = st.session_state.user_input
-
-        if user_question:
-            user_input(user_question, [])
-
-            # Display AI reply in the chat layout
-            st.text("AI Bot:")
-            st.text(response["output_text"])
-
-    # Button to copy to clipboard
+    # Add a "Copy to Clipboard" button
     if st.button("Copy to Clipboard", key="copy_button"):
         pyperclip.copy(response["output_text"])
         st.success("Copied to Clipboard!")
+
+# Main Streamlit app
+def main():
+    st.header("Chat with multi PDF using AI 💁")
+
+    user_question = st.text_input("Ask a Question from the PDF Files")
+
+    if user_question:
+        user_input(user_question, [])
+
+    with st.sidebar:
+        st.title("Menu:")
+        pdf_docs = st.file_uploader("Upload your PDF Files and Click on the Submit & Process Button", type=["pdf"], accept_multiple_files=True)
+        if st.button("Submit & Process"):
+            with st.spinner("Processing..."):
+                raw_text = get_pdf_text(pdf_docs)
+                text_chunks = get_text_chunks(raw_text)
+                get_vector_store(text_chunks)
+                st.success("Done")
 
 if __name__ == "__main__":
     main()
